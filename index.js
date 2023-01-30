@@ -5,72 +5,87 @@ const sourceUrl =
 var download = async function (url, dest, cb) {
   var file = fs.createWriteStream(dest);
   let response = await fetch(url).catch(function (err) {
-    // Handle errors
     fs.unlink(dest, () => {
-      console.log(err);
       cb();
-    }); // Delete the file async. (But we don't check the result)
-    if (cb) cb(err.message);
+    });
   });
-  if (response.status === 200) {
+  if (response?.status === 200) {
     response.body.pipe(file);
     file.on("finish", function () {
       file.close(cb); // close() is async, call cb after close completes.
     });
   } else {
     // Consume response data to free up memory
-    cb();
-    throw new Error(
-      url,
-      `Request Failed With a Status Code: ${response.statusCode}`
+    console.error(
+      `Request Failed With a Status Code: ${response?.status} ,${url}`
     );
+    cb();
   }
 };
 (async () => {
-  let arr = await fetch(sourceUrl).then((res) =>
-    res.text().then((text) => text.split("\n"))
-  );
-  let end = false;
-  let index = 0;
-  while (!end) {
-    try {
-      await new Promise((resolve, reject) => {
-        new Array(10).fill(true).forEach(async (item, i, list) => {
-          if (index === arr.length) {
-            console.log(index, arr.length);
-            end = true;
-            return;
-          }
-          const url = arr[index];
-          index++;
-          if (!url.includes("###")) {
-            var filename = url.substring(url.lastIndexOf("/") + 1);
-            var dir =
-              "./images" +
-              url
-                .replace("https://static.mobelaris.com", "")
-                .replace(filename, "")
-                .trim();
-            const dest = dir + "/" + filename;
-            if (!fs.existsSync(dir)) {
-              fs.mkdirSync(dir, { recursive: true });
-            }
-            try {
-              console.log("start", { url, dest });
-              download(url, dest, () => {
-                console.log("end", { url, dest });
-              });
-              if (i === list.length - 1) {
-                resolve();
+  try {
+    let list = await fetch(sourceUrl).then((res) =>
+      res.text().then((text) => text.split("\n"))
+    );
+    const { arr } = list.reduce(
+      (result, item) => {
+        let trimmeditem = item.trim();
+        if (trimmeditem.includes("###")) {
+          result.parent = trimmeditem.replace("###", "");
+          result.last = {
+            parent: result.parent,
+            items: [],
+          };
+          result.arr.push(result.last);
+        } else {
+          result.last.items.push(trimmeditem);
+        }
+        return result;
+      },
+      {
+        arr: [],
+        parent: "",
+        last: null,
+      }
+    );
+
+    console.log({ arr }, arr[4]);
+    let end = false;
+    let index = 0;
+    while (!end) {
+      let item = arr[index];
+      let parent = item.parent;
+      try {
+        const arr = item.items;
+        console.log(JSON.stringify({ index, parent, size: list.length }));
+        await new Promise((resolve, reject) => {
+          arr.forEach(async (item, i, list) => {
+            const url = item;
+
+            if (!url.includes("###")) {
+              var filename = url.substring(url.lastIndexOf("/") + 1);
+              var dir = "./images/" + parent;
+              const dest = dir + "/" + filename;
+              if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
               }
-            } catch (error) {
-              console.error(error, url);
+              download(url, dest, () => {
+                if (i === list.length - 1) {
+                  resolve();
+                }
+              });
             }
-          }
+          });
         });
-      });
-    } catch (error) {
-      console.error(error);
+      } catch (error) {
+        console.error(error);
+      }
+      index++;
+      if (index === arr.length) {
+        end = true;
+      }
     }
+  } catch (error) {
+    console.error(error);
   }
 })();
